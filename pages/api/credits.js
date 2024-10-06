@@ -1,5 +1,5 @@
 import { getSession } from 'next-auth/react';
-import db from '../models/database'; // adjust the path if necessary
+import db from '../models/database'; // Adjust the path if necessary
 
 export default async function handler(req, res) {
     const session = await getSession({ req });
@@ -16,11 +16,12 @@ export default async function handler(req, res) {
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-        const credits = user.credits || 0; // Default to 0 if no credits found
 
-        res.status(200).json({ credits });
+        const credits = user.balance || 0; // Default to 0 if no credits found
+
+        return res.status(200).json({ credits }); // Send credits back to the client
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        console.error('Error fetching credits:', error);
+        return res.status(500).json({ error: 'Internal Server Error' });
     }
 }

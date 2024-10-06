@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
+import DashHeader from './components/DashHeader';
 
 const Dashboard = () => {
     const { data: session, status } = useSession();
@@ -103,8 +104,20 @@ const Dashboard = () => {
 
     const handleUpgradeInstance = async () => {
         if (!selectedPlan || !selectedInstance) return;
-
+    
         try {
+            // Fetch the latest balance from the database
+            const balanceResponse = await fetch(`/api/credits?userID=${session.user.id}`);
+            const balanceData = await balanceResponse.json();
+            const userBalance = balanceData.credits || 0; // Default to 0 if no balance found
+    
+            // Check if the user has enough balance
+            if (userBalance < selectedPlan.cost) {
+                alert("You do not have enough balance to upgrade to this plan."); // Notify the user
+                return;
+            }
+    
+            // Proceed with the upgrade
             const response = await fetch('/api/vpsHandler', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -115,7 +128,7 @@ const Dashboard = () => {
                     cores: selectedPlan.cores
                 })
             });
-
+    
             const data = await response.json();
             console.log(data.message);
             setUpgradeMenuVisible(false);
@@ -125,6 +138,7 @@ const Dashboard = () => {
             console.error("Error upgrading instance:", error);
         }
     };
+    
 
     const handleCreateClick = () => {
         router.push('/create'); // Navigate to the create page
@@ -146,6 +160,8 @@ const Dashboard = () => {
     }
 
     return (
+    <>
+        <DashHeader />
         <div className="min-h-screen flex flex-col items-center bg-gray-50 p-6 text-black">
             <h1 className="text-4xl font-bold mb-6">Dashboard</h1>
             <h2 className="text-2xl mb-4">Welcome, {session.user.name}</h2>
@@ -231,7 +247,7 @@ const Dashboard = () => {
                                     className={`p-4 rounded ${selectedPlan === plan ? 'bg-blue-600 text-white' : 'bg-gray-200 text-black hover:bg-gray-300'}`}
                                     onClick={() => handlePlanSelect(plan)}
                                 >
-                                    {plan.name}: {plan.memory / 1024}GB RAM, {plan.cores} Cores, ${plan.cost}
+                                    {plan.name}: {plan.memory / 1024}GB RAM, {plan.cores} Cores, {plan.cost} Credits
                                 </button>
                             ))}
                         </div>
@@ -245,7 +261,9 @@ const Dashboard = () => {
                 </div>
             )}
         </div>
-    );
+    </>
+);
+
 };
 
 export default Dashboard;
