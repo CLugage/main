@@ -1,5 +1,5 @@
 import { getSession } from 'next-auth/react';
-import db from '../models/database'; // Adjust the path if necessary
+import db from '../../models/database'; // Adjust the path if necessary
 
 export default async function handler(req, res) {
     const session = await getSession({ req });

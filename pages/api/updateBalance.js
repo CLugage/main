@@ -1,6 +1,6 @@
 // pages/api/updateBalance.js
-import dbConnect from '../utils/dbConnect'; 
-import { User } from '../models/database'; 
+import dbConnect from '../../utils/dbConnect'; 
+import { User } from '../../models/database'; 
 
 export default async function handler(req, res) {
     // Allow only POST requests
