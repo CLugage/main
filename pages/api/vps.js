@@ -1,5 +1,5 @@
-import dbConnect from '../../utils/dbConnect';
-import { VPS } from '../../models/database';
+import dbConnect from '../utils/dbConnect';
+import { VPS } from '../models/database';
 
 export default async function handler(req, res) {
     await dbConnect();

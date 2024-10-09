@@ -8,17 +8,18 @@ export default NextAuth({
             clientId: process.env.DISCORD_CLIENT_ID,
             clientSecret: process.env.DISCORD_CLIENT_SECRET,
             authorization: {
+                // Ensure the correct authorization URL
                 url: 'https://discord.com/oauth2/authorize',
                 params: { grant_type: 'authorization_code' },
             },
-            // Optional: Specify the redirect URI
-            redirectUri: process.env.NEXTAUTH_URL + "/api/auth/callback/discord",
+            // Specify the redirect URI, ensuring it matches Discord settings
+            redirectUri: `${process.env.NEXTAUTH_URL}/api/auth/callback/discord`,
         }),
     ],
     session: {
         strategy: "jwt",
-        maxAge: 30 * 24 * 60 * 60,
-        updateAge: 24 * 60 * 60,
+        maxAge: 30 * 24 * 60 * 60, // 30 days
+        updateAge: 24 * 60 * 60,    // 1 day
     },
     callbacks: {
         async jwt({ token, user }) {
@@ -32,8 +33,17 @@ export default NextAuth({
             return session;
         },
     },
-    
     pages: {
         signIn: '/login', // Custom sign-in page
+    },
+    events: {
+        // You can add an event to log successful sign-ins
+        signIn: async (message) => {
+            console.log("User signed in:", message);
+        },
+        // Log errors for better debugging
+        error: async (message) => {
+            console.error("Authentication error:", message);
+        },
     },
 });

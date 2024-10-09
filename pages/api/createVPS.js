@@ -1,88 +1,91 @@
-import db from '../models/database'; // Adjust the path to your db.js file
+import db from '../../models/database'; // Adjust the path to your db.js file
 import shell from 'shell-exec'; // Ensure this package is installed
 import fs from 'fs';
 
-async function createVPS(name, ip, os) {
-    console.log(`Creating ${name} with IP: ${ip} | OS: ${os}`);
+function generateRandomPassword(length = 12) {
+    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*_+";
+    let password = "";
+    for (let i = 0; i < length; i++) {
+        const randomIndex = Math.floor(Math.random() * charset.length);
+        password += charset[randomIndex];
+    }
+    return password;
+}
 
-    // Fetch the node to get the next available proxID
-    const node = await db.Node.findOne(); // You might want to specify a particular node if you have multiple
+async function createVPS(userID, name, ip, os) {
+    console.log(`Creating VPS: ${name} with IP: ${ip} | OS: ${os}`);
+
+    const node = await db.Node.findOne();
     if (!node) {
         console.error(`No node found in the database.`);
         return { success: false, message: `No node found in the database.` };
     }
 
-    const proxID = node.nextID; // Get the current nextID from the node
-
-    // Check if the VPS already exists
+    const proxID = node.nextID; // Get the current nextID
     const userVPS = await db.VPS.findOne({ proxID });
     if (userVPS) {
         console.error(`VPS already exists: ${proxID}`);
-        return { success: false, message: `VPS already exists: ${proxID}` }; // Prevent duplication if you don't want duplicates
+        return { success: false, message: `VPS already exists: ${proxID}` };
     }
 
-    // Fetch available ports from the database
     const availablePort = await db.Port.findOne({ isUsed: false });
     if (!availablePort) {
         console.error(`No available ports found.`);
         return { success: false, message: `No available ports found.` };
     }
 
-    // Assign the port to the VPS
     const sshPort = availablePort.port;
-
     let osPath = '';
-    // Map OS names to template file names
+
+    // Define OS paths
     if (os === 'alpine') {
         osPath = 'alpine-3.20-default_20240908_amd64.tar.xz';
     } else if (os === 'debian') {
         osPath = 'debian-12-standard_12.7-1_amd64.tar.zst';
     } else {
         console.error(`Unsupported OS: ${os}`);
-        return { success: false, message: `Unsupported OS: ${os}` }; // Exit if the OS is not supported
+        return { success: false, message: `Unsupported OS: ${os}` };
     }
 
-    const createCMD = getCreateCMD(osPath, proxID, { os, ip, memory: 1024, cores: 1 }); // Adjust memory and cores as needed
-    console.log(`Creating VPS with command: ${createCMD}`);
+    const password = generateRandomPassword(); // Generate a random password
+    const createCMD = getCreateCMD(osPath, proxID, { os, ip: `${ip}/24`, memory: 4000, cores: 2, password });
 
-    // Execute the VPS creation command
+    console.log(`Creating VPS with command: [HIDDEN]`); // Avoid logging the command with the password
     const vpsCreateRes = await shell(createCMD);
-    if (vpsCreateRes.stderr.length > 0) {
-        console.error(`Error creating VPS: ${vpsCreateRes.stderr}`);
-        return { success: false, message: `Error creating VPS: ${vpsCreateRes.stderr}` };
+
+    if (vpsCreateRes.stderr.length > 0 || vpsCreateRes.stdout.length === 0) {
+        console.error(`Error creating VPS: ${vpsCreateRes.stderr || 'No output received'}`);
+        return { success: false, message: `Error creating VPS: ${vpsCreateRes.stderr || 'No output received'}` };
     }
 
     // Copy firewall rules
     await shell(`cp /etc/pve/firewall/100.fw /etc/pve/firewall/${proxID}.fw`);
-
-    // Perform OS-specific setup
     await setupOS(os, proxID);
-
-    // Add port forwarding for SSH
     await addForward(sshPort, 22, ip);
 
-    // Create the VPS entry in the database
     const newVPS = new db.VPS({
+        userID,
         name,
         proxID,
         ip,
         sshPort,
         os,
+        password, // Save the generated password in the database
         status: 'active',
     });
     await newVPS.save();
 
-    // Update the nextID in the Node collection
-    node.nextID += 1; // Increment the nextID
+    // Increment nextID and save the node
+    node.nextID += 1; // Increment nextID by 1
     await node.save();
 
-    // Mark the port as used
+    // Update the available port status
     availablePort.isUsed = true;
-    availablePort.vpsID = newVPS._id; // Link to the created VPS
+    availablePort.vpsID = newVPS._id;
     await availablePort.save();
 
     console.log(`${name} - Create done!`);
-    return { success: true, message: `${name} created successfully.` };
+    return { success: true, message: `${name} created successfully.`, password }; 
 }
 
 async function setupOS(os, proxID) {
@@ -107,24 +110,28 @@ async function setupOS(os, proxID) {
             await shell(`pct exec ${proxID} bash -- -c "sed -i 's#/bin/bash#/bin/zsh#' /etc/passwd"`);
         }
     } catch (error) {
-        console.error(`Error setting up OS ${os} for proxID ${proxID}: ${error.message}`);
+        console.error(`Error setting up OS: ${error.message}`);
     }
 }
 
 async function addForward(port, intPort, ip) {
     console.log(`Adding port forwarding: ${port} -> ${ip}:${intPort}`);
 
+    // Ensure the directory for port scripts exists
     const natPreDownPath = '/root/nat-pre-down.sh';
     const natPostUpPath = '/root/nat-post-up.sh';
 
+    // Add NAT rule for the port
     const preDownContent = `iptables -t nat -D PREROUTING -i vmbr0 -p tcp --dport ${port} -j DNAT --to ${ip}:${intPort}\n`;
     const postUpContent = `iptables -t nat -A PREROUTING -i vmbr0 -p tcp --dport ${port} -j DNAT --to ${ip}:${intPort}\n`;
 
-    // Append commands to the NAT scripts
+    // Append rules to the NAT scripts
     fs.appendFileSync(natPreDownPath, preDownContent);
     fs.appendFileSync(natPostUpPath, postUpContent);
 
+    // Execute the nat-post-up.sh script to apply changes immediately
     const result = await shell(`bash ${natPostUpPath}`);
+
     if (result.stderr) {
         console.error(`Error executing nat-post-up.sh: ${result.stderr}`);
     } else {
@@ -135,28 +142,45 @@ async function addForward(port, intPort, ip) {
 }
 
 function getCreateCMD(path, proxID, data) {
-    let cmd = `pct create ${proxID} /var/lib/vz/template/cache/${path} --swap=256 --hostname=${data.os}${proxID} --memory=${data.memory} --cores=${data.cores} --net0 name=eth0,bridge=vmbr0,ip=${data.ip},gw=10.10.10.1 --rootfs=local-lvm:3`;
+    console.log("Creating VPS with the following parameters:");
+    console.log("Path:", path);
+    console.log("ProxID:", proxID);
+    console.log("OS:", data.os);
+    console.log("IP:", data.ip);
+    
+    let cmd = '';
+    cmd += `pct create ${proxID} /var/lib/vz/template/cache/${path} `;
+    cmd += `--swap=256 `;
+    cmd += `--hostname=${data.os}${proxID} `;
+    cmd += `--memory=${data.memory} `;
+    cmd += `--cmode=shell `;
+    cmd += `--net0 name=eth0,bridge=vmbr0,firewall=1,gw=10.10.10.1,ip=${data.ip},rate=3 `;
+    cmd += `--ostype=${data.os} `;
+    cmd += `--password ${data.password} `; 
+    cmd += `--start=1 `;
+    cmd += `--unprivileged=1 `;
+    cmd += `--cores=${data.cores} `;
+    cmd += `--features fuse=1,nesting=1,keyctl=1 `;
+    cmd += `--rootfs local-lvm:3`;
 
-    // Optional disk configuration
-    if (data.disk) {
-        cmd += ` --rootfs=local-lvm:${data.disk}`;
-    }
+    console.log("VPS Creation Command: [HIDDEN]"); // Avoid logging sensitive information
 
     return cmd;
 }
 
-// API handler
+// Default export for the API route
 export default async function handler(req, res) {
     if (req.method === 'POST') {
-        const { name, ip, os } = req.body;
+        const { userID, name, ip, os } = req.body;
 
-        // Call createVPS and handle the response
-        const result = await createVPS(name, ip, os);
-        if (result && result.success) {
-            return res.status(200).json({ message: result.message });
-        } else {
-            return res.status(500).json({ message: result.message || 'Failed to create VPS.' });
+        if (!userID || !name || !ip || !os) {
+            return res.status(400).json({ success: false, message: "All fields are required." });
         }
+
+        const result = await createVPS(userID, name, ip, os);
+        res.status(result.success ? 200 : 400).json(result);
+    } else {
+        res.setHeader('Allow', ['POST']);
+        res.status(405).end(`Method ${req.method} Not Allowed`);
     }
-    return res.status(405).json({ message: 'Method not allowed' });
 }

@@ -8,41 +8,27 @@ const AFKPage = () => {
     const [elapsedTime, setElapsedTime] = useState(0);
 
     useEffect(() => {
-        // Exit early if there's no active session
         if (!session) {
             console.log("Session not available");
             return; 
         }
 
-        console.log('Session Data:', session); // Log session data for debugging
-
         const creditInterval = setInterval(() => {
-            // Call API to update the balance in the database
             fetch('/api/updateBalance', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId: session.user.id, creditsEarned: 1 }),
             })
-            .then(response => {
-                if (!response.ok) {
-                    // Log the error response status
-                    console.error('Failed to update balance:', response.status, response.statusText);
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-                return response.json();
-            })
+            .then(response => response.ok ? response.json() : Promise.reject(response))
             .then(data => {
                 console.log('Updated balance:', data.balance);
                 setCredits(prev => prev + 1);
             })
-            .catch(error => {
-                console.error('Error updating balance:', error.message); // More specific error logging
-            });
-        }, 10000); // 30 seconds
+            .catch(error => console.error('Error updating balance:', error));
+        }, 30000); // 30 seconds
 
         const timerInterval = setInterval(() => setElapsedTime(prev => prev + 1), 1000); // 1 second
 
-        // Cleanup function to clear intervals on unmount
         return () => {
             clearInterval(creditInterval);
             clearInterval(timerInterval);
@@ -58,10 +44,10 @@ const AFKPage = () => {
     return (
         <div className="flex flex-col items-center justify-center h-screen bg-gray-100">
             <div className="bg-white shadow-lg rounded-lg p-8 max-w-md w-full text-center">
-                <h1 className="text-3xl font-bold mb-4 text-black">You're Earning Credits!</h1>
+                <h1 className="text-3xl font-bold mb-4 text-black">You&apos;re Earning Credits!</h1>
                 <p className="text-xl mb-2 text-black">Credits Earned: {credits} 🌟</p>
                 <p className="text-lg text-black">Elapsed Time: {formatTime(elapsedTime)}</p>
-                <p className="mt-4 text-gray-700">Stay away from your keyboard, and we'll keep rewarding you for every minute you're AFK!</p>
+                <p className="mt-4 text-gray-700">Stay away from your keyboard, and we&apos;ll keep rewarding you for every minute you&apos;re AFK!</p>
             </div>
         </div>
     );

@@ -1,32 +1,32 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
+import { useSession } from 'next-auth/react'; // Importing the session hook
 
 const CreateInstance = () => {
     const [instanceName, setInstanceName] = useState('');
     const [selectedOS, setSelectedOS] = useState('');
+    const [loading, setLoading] = useState(false);  // Loading state
+    const [error, setError] = useState('');  // Error state
     const router = useRouter();
+    const { data: session } = useSession(); // Get the session
 
-    // Function to generate a random IP address
     const getRandomIP = () => {
-        const randomPart = Math.floor(Math.random() * 254) + 1; // Random number between 1 and 254
-        return `10.10.10.${randomPart}`; // Example IP in the 10.10.10.x range
+        const randomPart = Math.floor(Math.random() * 254) + 1;
+        return `10.10.10.${randomPart}`;
     };
 
-    // Function to generate a random SSH port
     const getRandomPort = () => {
-        return Math.floor(Math.random() * (65535 - 1024 + 1)) + 1024; // Random port between 1024 and 65535
+        return Math.floor(Math.random() * (65535 - 1024 + 1)) + 1024;
     };
 
-    // Function to generate a random VMID
     const getRandomVMID = async () => {
-        // Generate a random VMID that doesn't already exist
         let vmid;
         do {
-            vmid = Math.floor(Math.random() * 10000) + 100; // Random VMID between 100 and 10000
+            vmid = Math.floor(Math.random() * 10000) + 100;
             const response = await fetch(`/api/vpsExists?proxID=${vmid}`);
             const data = await response.json();
             if (data.exists) {
-                vmid = null; // Reset if exists
+                vmid = null;
             }
         } while (!vmid);
         return vmid;
@@ -34,43 +34,56 @@ const CreateInstance = () => {
 
     const handleCreateInstance = async (e) => {
         e.preventDefault();
+        setLoading(true);  // Start loading
+        setError('');  // Reset error
+    
+        try {
+            const ip = getRandomIP();
+            const sshPort = getRandomPort();
+            const proxID = await getRandomVMID();
 
-        // Generate random IP, port, and VMID
-        const ip = getRandomIP();
-        const sshPort = getRandomPort();
-        const proxID = await getRandomVMID();
+            // Ensure userID is available from the session
+            const userID = session?.user?.id; // Get userID from session
+    
+            if (!userID) {
+                setError('User not found. Please log in again.');
+                return;
+            }
 
-        // Prepare the request body
-        const requestBody = {
-            name: instanceName,
-            proxID: proxID,
-            ip: ip,
-            sshPort: { port: sshPort },
-            os: selectedOS, // Sending the selected OS to the backend
-        };
-
-        // Make the API call to create the VPS
-        const response = await fetch('/api/createVPS', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestBody),
-        });
-
-        if (response.ok) {
-            console.log('VPS created successfully');
-            // Navigate back to the dashboard after creation
-            router.push('/dashboard');
-        } else {
-            console.error('Error creating VPS');
+            const requestBody = {
+                name: instanceName,
+                proxID: proxID,
+                ip: ip,
+                sshPort: sshPort,
+                os: selectedOS,
+                userID: userID,  // Add userID to the request
+            };
+    
+            const response = await fetch('/api/createVPS', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody),
+            });
+    
+            if (response.ok) {
+                router.push('/dashboard');
+            } else {
+                setError('Failed to create instance. Please try again.');
+            }
+        } catch (err) {
+            setError('An error occurred. Please try again.');
+        } finally {
+            setLoading(false);  // End loading
         }
     };
-
+    
     return (
         <div className="min-h-screen flex flex-col items-center bg-gray-50 p-6">
             <h1 className="text-4xl font-bold text-black mb-6">Create Instance</h1>
             <form onSubmit={handleCreateInstance} className="bg-white p-6 rounded shadow-md w-full max-w-md">
+                {error && <p className="text-red-600 mb-4">{error}</p>}
                 <div className="mb-4">
                     <label htmlFor="instanceName" className="block text-sm font-medium text-gray-700">
                         Instance Name
@@ -98,14 +111,14 @@ const CreateInstance = () => {
                         <option value="" disabled>Select an OS</option>
                         <option value="alpine">Alpine</option>
                         <option value="debian">Debian</option>
-                        {/* Add more OS options as needed */}
                     </select>
                 </div>
                 <button
                     type="submit"
-                    className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    className={`w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    disabled={loading}
                 >
-                    Create Instance
+                    {loading ? 'Creating...' : 'Create Instance'}
                 </button>
             </form>
         </div>
